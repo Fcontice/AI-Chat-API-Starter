@@ -9,12 +9,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.use((req, _res, next) => {
+  logger.info({ method: req.method, url: req.url }, 'Incoming request');
+  next();
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api', chatRoutes);
 
 app.use((err, req, res, next) => {
-  logger.error({ err }, 'Unhandled error');
-  res.status(500).json({ error: 'Internal server error' });
+  const status = err.status || err.statusCode || 500;
+  const message = err.message || 'Internal server error';
+  logger.error({ err: message, status }, 'Unhandled error');
+  res.status(status).json({ error: message });
 });
 
 const server = app.listen(config.port, () => {

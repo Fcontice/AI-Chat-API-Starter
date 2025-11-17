@@ -1,4 +1,5 @@
-const { createProvider } = require('../config/aiProviders');
+const createError = require('http-errors');
+const { runChat } = require('../config/aiProviders');
 const config = require('../config/config');
 const logger = require('../config/logger');
 
@@ -7,34 +8,34 @@ const buildMessageList = (messages, systemPrompt) => {
   return [{ role: 'system', content: systemPrompt }, ...messages];
 };
 
-const handleChat = async (req, res) => {
-  const body = req.validatedBody || req.body;
-  const {
-    provider = config.defaultProvider,
-    model,
-    messages,
-    systemPrompt,
-    stream = false,
-    temperature,
-    max_tokens,
-    metadata
-  } = body;
-
-  const providerClient = createProvider(provider);
-  if (!providerClient) {
-    return res.status(400).json({ error: `Unsupported provider: ${provider}` });
-  }
-
+const handleChat = async (req, res, next) => {
   try {
-    const messageList = buildMessageList(messages, systemPrompt);
-    const result = await providerClient.sendChat({
-      messages: messageList,
-      stream,
+    const body = req.validatedBody || req.body;
+    const {
+      provider = config.defaultProvider,
       model,
+      messages,
+      systemPrompt,
+      stream = false,
       temperature,
       max_tokens,
-      metadata,
-      system: systemPrompt
+      metadata
+    } = body;
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      throw createError(400, 'messages must contain at least one item');
+    }
+
+    const messageList = buildMessageList(messages, systemPrompt);
+    const result = await runChat({
+      provider,
+      model,
+      messages: messageList,
+      systemPrompt,
+      stream,
+      temperature,
+      max_tokens,
+      metadata
     });
 
     if (stream && result.stream) {
@@ -45,17 +46,15 @@ const handleChat = async (req, res) => {
       return;
     }
 
-    return res.json({
+    res.status(200).json({
       provider,
       model: model || null,
       message: result.message,
       raw: result.raw
     });
-  } catch (error) {
-    logger.error({ err: error }, 'Chat request failed');
-    const status = error.response?.status || 500;
-    const details = error.response?.data || error.message;
-    return res.status(status).json({ error: 'Chat request failed', details });
+  } catch (err) {
+    logger.error({ provider: req.body?.provider || config.defaultProvider, err: err.message }, 'Chat error');
+    next(err);
   }
 };
 
